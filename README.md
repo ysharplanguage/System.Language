@@ -4,4 +4,6 @@
 
 [Try it on repl.it](https://repl.it/FTwz/5)
 
+![Hindley-Milner type inference over (Lisp-ish) S-expressions](tiri.jpg)
+
 CJ
