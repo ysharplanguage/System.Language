@@ -55,7 +55,7 @@ namespace Test
                     // Required
                     Syntax.Lexical("'", Syntax.Quoting),
 
-                    // Not-quite-Lisp-indeed; just tolen from our host, C#, as-is
+                    // Not-quite-Lisp-indeed; just stolen from our host, C#, as-is
                     Syntax.Lexical("\\/\\/.*", Syntax.Commenting),
                     Syntax.Lexical("false", (token, match) => false),
                     Syntax.Lexical("true", (token, match) => true),
