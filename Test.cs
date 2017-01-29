@@ -328,7 +328,7 @@ namespace Test
                         (
                             ( id ( ( x ) => x ) )
                             ( factorial ( ( n ) => ( if ( > n 0 ) ( * n ( factorial ( - n 1 ) ) ) 1 ) ) )
-                            ( compose ( ( f g ) => ( ( x ) => ( g ( f x ) ) ) ) )
+                            ( f_o_g ( ( f g ) => ( ( x ) => ( f ( g x ) ) ) ) )
 
                             // See http://lambda-the-ultimate.org/node/5408
                             ( f ( ( x ) => ( Pair ( g true ) x ) ) )              // ML-ish: f x = (g True, x)
@@ -349,19 +349,34 @@ namespace Test
                                 )
                             ) )
 
-                            // See (page 3, examples ""Double"", ""Mycroft"", ""Sum List""...)
+                            // See (page 3, examples ""Double"", ""Mycroft"", ""Sum List"", ""Composition""...)
                             // [Hallett & Kfoury] http://itrs04.di.unito.it/papers/hk.pdf
-                            ( sqList ( ( l ) => ( fmap ( ( x ) => ( * x ( + x 0 ) ) ) l ) ) )
-                            ( compList ( ( l ) => ( fmap ! l ) ) )
 
+                            // Double
                             ( double ( ( f ) => ( ( x ) => ( f ( f x ) ) ) ) )
                             ( foo ( ( n ) => ( ( double ( ( num ) => ( + num 1 ) ) ) n ) ) )
                             ( bar ( ( s ) => ( ( double escape ) s ) ) )
 
+                            // Mycroft
+                            ( sqList ( ( l ) => ( fmap ( ( x ) => ( * x ( + x 0 ) ) ) l ) ) )
+                            ( compList ( ( l ) => ( fmap ! l ) ) )
+
+                            // Sum List
                             ( sumList ( ( l ) =>
                                 ( if ( empty l )
                                     0
                                     ( + ( id ( head l ) ) ( sumList ( id ( tail l ) ) ) )
+                                )
+                            ) )
+
+                            // Isomorphic Compositions
+                            ( createList ( ( x ) => ( x : ( ) ) ) )
+                            ( removeList ( ( l ) => ( head l ) ) )
+                            ( comp ( ( f g ) => ( f_o_g f g ) ) )
+                            ( appComp ( ( v1 v2 ) =>
+                                ( =
+                                    ( ( comp removeList createList ) v1 )
+                                    ( head ( ( comp createList removeList ) v2 ) )
                                 )
                             ) )
                         )
@@ -369,14 +384,14 @@ namespace Test
                         // report type inference results thru a fat tuple in the let's body
                         ( :
                             // (uncomment whatever you're interested in)
-                            ( factorial ( id 10 ) )
-                            //( fmap ( compose parseInt factorial ) ( ""0"" : ( ""1"" : ( ""2"" : ( ""3"" : ( ) ) ) ) ) )
+                            ( fmap ( f_o_g factorial parseInt ) ( ""0"" : ( ""1"" : ( ""2"" : ( ""3"" : ( ) ) ) ) ) )
                             //( first ( f true ) )
-                            //( sqList ( 0 : ( 1 : ( 2 : ( 3 : ( ) ) ) ) ) )
-                            //( compList ( true : ( false : ( ) ) ) )
                             //( foo 123 )
                             //( bar ""z"" )
+                            //( sqList ( 0 : ( 1 : ( 2 : ( 3 : ( ) ) ) ) ) )
+                            //( compList ( true : ( false : ( ) ) ) )
                             //( sumList ( 1 : ( 2 : ( 3 : ( ) ) ) ) )
+                            //( appComp 5 ( 5 : ( ) ) )
                         )
                     )
                 ");
