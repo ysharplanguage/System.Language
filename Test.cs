@@ -166,7 +166,9 @@ namespace Test
             isFunction = type => type != null ? (type.Constructor != null ? type.Constructor.Id == TypeSystem.Function.Id : isFunction(type.Self)) : false;
             Func<object, bool> isArray = value => value is object[];
             Func<object, object[]> array = value => (object[])value;
-            Func<object[], bool> isSingleton = value => (value.Length == 3) && isArray(value[2]) && (array(value[2]).Length == 0);
+            Func<object, bool> isNil = value => isArray(value) && (array(value).Length == 0);
+            Func<object[], bool> isSingleton = value => (value.Length == 3) && isNil(value[2]);
+            var NIL = new object[0];
 
             // A sort of poor man's visitor (over the S-expr) : just a bunch of lambdas
             Func<object, Node> visitSExpr = null;
@@ -216,7 +218,7 @@ namespace Test
                         :
                         (
                             // ( id|sexpr )
-                            array(sexpr).Length > 0 ?
+                            !isNil(sexpr) ?
                             (
                                 Syntax.Identifier(array(sexpr)[0]) == null ?
                                 // ( sexpr )
@@ -227,7 +229,7 @@ namespace Test
                             )
                             :
                             // ( )
-                            visitConst(env[ListType.Id])
+                            visitConst(ListType)
                         )
                     )
                     :
@@ -247,7 +249,7 @@ namespace Test
                     if (((id = Syntax.Identifier(array(apply)[0])) != null) && (!env.ContainsKey(id) || isFunction(env[id])))
                     {
                         var fn = Node.Var(id, !env.ContainsKey(id) ? env[id] = newFunction(array(apply).Skip(1).Select(arg => system.NewGeneric()).Concat(new[] { system.NewGeneric() }).ToArray()) : env[id]);
-                        return Node.Apply(fn, array(apply).Skip(1).Select(arg => visitSExpr(arg)).Cast<Node>().ToArray());
+                        return Node.Apply(fn, array(apply).Skip(1).Select(arg => visitSExpr(arg)).ToArray());
                     }
                     else
                     {
@@ -255,7 +257,7 @@ namespace Test
                             Node.Apply
                             (
                                 visitSExpr(array(apply)[0]),
-                                array(apply).Skip(1).Select(arg => visitSExpr(arg)).Cast<Node>().ToArray(),
+                                array(apply).Skip(1).Select(arg => visitSExpr(arg)).ToArray(),
                                 id != null ? env[id] : null
                             );
                     }
