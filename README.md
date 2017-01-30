@@ -4,7 +4,9 @@
 
 [Try it on repl.it](https://repl.it/FTwz/8) :
 
-[https://repl.it/FTwz/8](https://repl.it/FTwz/8) :
+[https://repl.it/FTwz/8](https://repl.it/FTwz/8)
+
+...
 
 ![Hindley-Milner type inference over (Lisp-ish) S-expressions](tiri.jpg)
 
