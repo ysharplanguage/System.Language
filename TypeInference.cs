@@ -1,4 +1,4 @@
-﻿/*
+/*
 System.Language.TypeInference ( https://en.wikipedia.org/wiki/Hindley%E2%80%93Milner_type_system )
 
 Copyright (c) 2017 Cyril Jandia
@@ -115,6 +115,28 @@ namespace System.Language.TypeInference
         public override string ToString() => string.Format("( {0} {1})", Spec, Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty);
         public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
         {
+            if (Type != null)
+            {
+                var @const = Type as IType;
+                if ((@const != null) && (@const.Id != TypeSystem.Function.Id))
+                {
+                    if (!(Spec is Var) || ((((Var)Spec).Type as Type) != typeof(void)))
+                    {
+                        Args.Select
+                            (
+                                (arg, i) =>
+                                    (arg is Var) && !env.ContainsKey(((Var)arg).Id) ?
+                                    system.Infer(env, Define(Var(((Var)arg).Id), Const(@const[i])), types) :
+                                    null
+                            ).
+                            ToArray();
+                    }
+                    else
+                    {
+                        return system.NewType(@const, Args.Select(arg => (IType)arg.Spec).ToArray());
+                    }
+                }
+            }
             var args = Args.Select(arg => system.Infer(env, arg, types)).ToList();
             var expr = (Node)Spec;
             var type = system.Infer(env, expr, types);
@@ -123,8 +145,7 @@ namespace System.Language.TypeInference
             if (Type != null)
             {
                 ctor = !(Type is IType) ? system.@const(env, (string)Type) : (IType)Type;
-                system.Unify(system.NewType(ctor, args.ToArray()), type);
-                @out = type;
+                @out = system.Infer(env, Apply(Var(ctor.Id, typeof(void)), args.Select(arg => Const(arg)).ToArray(), ctor), types);
             }
             else
             {
@@ -168,6 +189,7 @@ namespace System.Language.TypeInference
         string Id { get; }
         IType[] Args { get; }
         IType Self { get; }
+        object Meta { get; }
         IType this[int index] { get; }
     }
     #endregion
@@ -179,10 +201,13 @@ namespace System.Language.TypeInference
         IType @const(IDictionary<string, IType> env, string ctor);
         IType NewGeneric();
         IType NewType(string id);
+        IType NewType(string id, object meta);
         IType NewType(string id, IType[] args);
-        IType NewType(IType constructor);
+        IType NewType(string id, IType[] args, object meta);
         IType NewType(IType constructor, IType[] args);
+        IType NewType(IType constructor, IType[] args, object meta);
         IType NewType(IType constructor, string id, IType[] args);
+        IType NewType(IType constructor, string id, IType[] args, object meta);
         void Unify(IType t, IType s);
         IType Infer(IDictionary<string, IType> env, Node node);
         IType Infer(IDictionary<string, IType> env, Node node, IList<IType> types);
@@ -199,6 +224,7 @@ namespace System.Language.TypeInference
             public virtual string Id { get; protected set; }
             public IType[] Args { get; private set; }
             public IType Self { get; internal set; }
+            public object Meta { get; protected set; }
             public IType this[int index] => Args[index];
         }
 
@@ -215,11 +241,11 @@ namespace System.Language.TypeInference
 
         internal class Type : Scheme
         {
-            internal Type(IType constructor, string id, IType[] args) : base(id, args) { Constructor = constructor ?? this; }
+            internal Type(IType constructor, string id, IType[] args, object meta) : base(id, args) { Constructor = constructor ?? this; Meta = meta; }
             public override string ToString() { int colon; string id; id = (colon = (id = Args.Length > 0 ? Id : base.ToString()).IndexOf(':')) > 0 ? id.Substring(0, colon) : id; return (Args.Length > 0 ? string.Format("{0}<{1}>", id, string.Concat(string.Join(", ", Args.Take(Args.Length - 1).Select(arg => arg.ToString())), (Args.Length > 1 ? ", " : string.Empty), Args[Args.Length - 1].ToString())) : id); }
         }
 
-        private static IType Create(IType constructor, string id, IType[] args) => new Type(constructor, id, args);
+        private static IType Create(IType constructor, string id, IType[] args, object meta) => new Type(constructor, id, args, meta);
         private static IType Prune(IType t)
         {
             Generic var = t as Generic;
@@ -260,7 +286,7 @@ namespace System.Language.TypeInference
         private int id;
         internal int NewId() => ++id;
 
-        public static readonly IType Function = Create(null, "Func", null);
+        public static readonly IType Function = Create(null, "Func", null, null);
         public static readonly ITypeSystem Default = Create();
         public static ITypeSystem Create() => new TypeSystem();
         public static ITypeSystem Create<TSystem>() where TSystem : ITypeSystem, new() => new TSystem();
@@ -277,10 +303,13 @@ namespace System.Language.TypeInference
         }
         public IType NewGeneric() => new Generic(this);
         public IType NewType(string id) => NewType(id, null);
-        public IType NewType(string id, IType[] args) => NewType(null, id, args);
-        public IType NewType(IType constructor) => NewType(constructor, null as IType[]);
-        public IType NewType(IType constructor, IType[] args) => NewType(constructor, constructor.Id, args);
-        public IType NewType(IType constructor, string id, IType[] args) => Create(constructor, id, args);
+        public IType NewType(string id, object meta) => NewType(id, null, meta);
+        public IType NewType(string id, IType[] args) => NewType(id, args, null);
+        public IType NewType(string id, IType[] args, object meta) => NewType(null, id, args, meta);
+        public IType NewType(IType constructor, IType[] args) => NewType(constructor, args, null);
+        public IType NewType(IType constructor, IType[] args, object meta) => NewType(constructor, constructor.Id, args, meta);
+        public IType NewType(IType constructor, string id, IType[] args) => NewType(constructor, id, args, null);
+        public IType NewType(IType constructor, string id, IType[] args, object meta) => Create(constructor, id, args, meta);
         public void Unify(IType t, IType s)
         {
             t = Prune(t);
