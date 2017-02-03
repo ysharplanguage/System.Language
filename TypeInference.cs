@@ -45,112 +45,150 @@ namespace System.Language.TypeInference
         public static Var Var(string name) => Var(name, null);
         public static Var Var(string name, object type) => new Var { Spec = name, Type = type };
         public static Apply Apply(Node expr, Node[] args) => Apply(expr, args, null);
-        public static Apply Apply(Node expr, Node[] args, object ctor) => new Apply { Spec = expr, Args = args, Type = ctor };
+        public static Apply Apply(Node expr, Node[] args, bool isAnnotation) => Apply(expr, args, null, isAnnotation);
+        public static Apply Apply(Node expr, Node[] args, object ctor) => Apply(expr, args, ctor, false);
+        public static Apply Apply(Node expr, Node[] args, object ctor, bool isAnnotation) => new Apply { Spec = expr, Args = args, Type = ctor, IsAnnotation = isAnnotation };
         public static Abstract Abstract(Node[] args, Node body) => Abstract(args, null, body);
         public static Abstract Abstract(Node[] args, object type, Node body) => new Abstract { Args = args, Body = body, Type = type };
         public static Define Define(Var var, Node body) => new Define { Spec = var, Body = (body as Node) ?? Const(body) };
         public static Let Let(Define[] defs, Node body) => new Let { Args = defs, Body = body };
-        public abstract IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types);
+        public abstract IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types);
         public object Spec { get; set; }
         public Node[] Args { get; set; }
         public Node Body { get; set; }
         public object Type { get; set; }
+        public bool IsAnnotation { get; private set; }
     }
 
     public class Const : Node
     {
         public override string ToString() => string.Concat("{", Spec, "}");
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types) => !(Spec is IType) ? system.@const(env, (string)Spec) : (IType)Spec;
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types) => !(Spec is IType) ? system.Const(env, (string)Spec) : (IType)Spec;
     }
 
     public class Var : Node
     {
         public override string ToString() => Id;
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
-        {
-            if (!env.ContainsKey(Id))
-            {
-                throw new InvalidOperationException(string.Concat("undefined ", Id));
-            }
-            return system.Fresh(env[Id], types.ToArray());
-        }
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types) => system.Fresh(env[Id], types.ToArray());
         public string Id => (string)Spec;
     }
 
     public class Abstract : Node
     {
         public override string ToString() => string.Format("( {0}){2} => {1}", Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty, Body, Type != null ? string.Concat(" : ", Type) : string.Empty);
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
         {
-            var scope = new Dictionary<string, IType>(env);
+            var scope = system.NewEnvironment(env);
             var known = new List<IType>(types);
             var args = new List<IType>();
             foreach (var arg in Args)
             {
-                var var = (Var)arg;
                 IType type;
-                if (var.Type == null)
+                Var var;
+                if (!(arg is Define))
                 {
-                    type = system.NewGeneric();
-                    known.Add(type);
+                    var = (Var)arg;
+                    if (var.Type != null)
+                    {
+                        type = !(var.Type is IType) ? system.Const(scope, (string)var.Type) : (IType)var.Type;
+                    }
+                    else
+                    {
+                        type = system.NewGeneric();
+                        known.Add(type);
+                    }
+                    scope[var.Id] = type;
                 }
                 else
                 {
-                    type = !(var.Type is IType) ? system.@const(scope, (string)var.Type) : (IType)var.Type;
+                    var spec = ((Define)arg).Body;
+                    var = (Var)((Define)arg).Spec;
+                    type = system.NewGeneric();
+                    system.Unify(type, system.Infer(scope, spec, known));
+                    scope[var.Id] = type;
+                    known.Add(type);
                 }
-                scope[var.Id] = type;
                 args.Add(type);
             }
             args.Add(system.Infer(scope, Body is Let ? Body.Args[Body.Args.Length - 1] : Body, known));
             if (Type != null)
             {
-                system.Unify(args[args.Count - 1], !(Type is IType) ? system.@const(scope, (string)Type) : (IType)Type);
+                system.Unify(args[args.Count - 1], !(Type is IType) ? system.Const(scope, (string)Type) : (IType)Type);
             }
-            return system.NewType(TypeSystem.Function, TypeSystem.Function.Id, args.ToArray());
+            return system.NewType(TypeSystem.Function, args.ToArray());
         }
     }
 
     public class Apply : Node
     {
-        public override string ToString() => string.Format("( {0} {1})", Spec, Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty);
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
+        private bool IsFunction(IType type) => type != null ? (type.Constructor != null ? type.Constructor == TypeSystem.Function : IsFunction(type.Self)) : false;
+        private Node ToFormal(ITypeSystem system, IEnvironment env, IList<IType> types, Node arg)
         {
-            if (Type != null)
+            Func<Var, IType> typed =
+                var =>
+                    IsAnnotation && !env.ContainsKey(var.Id) ? env[var.Id] = system.NewGeneric() : env[var.Id];
+            var formal =
+                IsAnnotation ?
+                (
+                    arg is Apply ?
+                    Define((Var)arg.Args[0], Const(system.Infer(env, (Node)arg.Spec, types)))
+                    :
+                    arg is Var ? Define((Var)arg, Const(typed((Var)arg))) : arg
+                )
+                :
+                arg is Var ? Define((Var)arg, Const(typed((Var)arg))) : arg;
+            return formal;
+        }
+        private IType AsAnnotationType(ITypeSystem system, IEnvironment env, IList<IType> types)
+        {
+            IType ctor;
+            if
+            (
+                (Spec is Node) &&
+                (((ctor = ((Node)Spec).Type as IType)) != null) &&
+                (!IsFunction(ctor) || IsAnnotation)
+            )
             {
-                var @const = Type as IType;
-                if ((@const != null) && (@const.Id != TypeSystem.Function.Id))
+                Args.Select
+                    (
+                        (arg, i) =>
+                            arg is Var ?
+                            system.Infer(env, Define((Var)arg, Const(ctor[i])), types)
+                            :
+                            null
+                    ).
+                    ToArray();
+                return system.NewType(ctor, Args.Select(arg => system.Infer(env, ToFormal(system, env, types, arg), types)).ToArray());
+            }
+            else
+            {
+                return null;
+            }
+        }
+        public override string ToString() => string.Format("( {0} {1})", Spec, Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty);
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
+        {
+            if (Type == null)
+            {
+                var annotation = AsAnnotationType(system, env, types);
+                if (annotation != null)
                 {
-                    if (!(Spec is Var) || ((((Var)Spec).Type as Type) != typeof(void)))
-                    {
-                        Args.Select
-                            (
-                                (arg, i) =>
-                                    (arg is Var) && !env.ContainsKey(((Var)arg).Id) ?
-                                    system.Infer(env, Define(Var(((Var)arg).Id), Const(@const[i])), types) :
-                                    null
-                            ).
-                            ToArray();
-                    }
-                    else
-                    {
-                        return system.NewType(@const, Args.Select(arg => (IType)arg.Spec).ToArray());
-                    }
+                    return annotation;
                 }
             }
-            var args = Args.Select(arg => system.Infer(env, arg, types)).ToList();
+            var args = Args.Select(arg => system.Infer(env, ToFormal(system, env, types, arg), types)).ToList();
             var expr = (Node)Spec;
-            var type = system.Infer(env, expr, types);
+            var self = system.Infer(env, expr, types);
             var @out = system.NewGeneric();
-            var ctor = null as IType;
             if (Type != null)
             {
-                ctor = !(Type is IType) ? system.@const(env, (string)Type) : (IType)Type;
-                @out = system.Infer(env, Apply(Var(ctor.Id, typeof(void)), args.Select(arg => Const(arg)).ToArray(), ctor), types);
+                var ctor = !(Type is IType) ? system.Const(env, (string)Type) : (IType)Type;
+                @out = system.Infer(env, Apply(Var(ctor.Id, ctor), args.Select(arg => Const(arg)).ToArray(), IsAnnotation), types);
             }
             else
             {
                 args.Add(@out);
-                system.Unify(system.NewType(TypeSystem.Function, TypeSystem.Function.Id, args.ToArray()), type);
+                system.Unify(system.NewType(TypeSystem.Function, args.ToArray()), self);
             }
             return @out;
         }
@@ -159,7 +197,7 @@ namespace System.Language.TypeInference
     public class Define : Node
     {
         public override string ToString() => string.Format("( {0} = {1} )", Spec, Body);
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
         {
             var known = new List<IType>(types);
             var type = system.NewGeneric();
@@ -174,9 +212,9 @@ namespace System.Language.TypeInference
     public class Let : Node
     {
         public override string ToString() => string.Format("( ( {0}) {1} )", Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty, Body);
-        public override IType Infer(ITypeSystem system, IDictionary<string, IType> env, IList<IType> types)
+        public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
         {
-            env = new Dictionary<string, IType>(env);
+            env = system.NewEnvironment(env);
             return Args.Select(let => let.Infer(system, env, types)).Concat(new[] { Body.Infer(system, env, types) }).Last();
         }
     }
@@ -189,19 +227,53 @@ namespace System.Language.TypeInference
         string Id { get; }
         IType[] Args { get; }
         IType Self { get; }
-        object Meta { get; }
         IType this[int index] { get; }
+        object Metadata { get; }
+    }
+    #endregion
+
+    #region Environment
+    public interface IEnvironment : IDictionary<string, IType>
+    {
+    }
+
+    public class Environment : Dictionary<string, IType>, IEnvironment
+    {
+        protected virtual IType Get(string id)
+        {
+            if (id == null)
+            {
+                throw new ArgumentNullException("id", "cannot be null");
+            }
+            if (!ContainsKey(id))
+            {
+                throw new InvalidOperationException(string.Format("undefined {0}", id));
+            }
+            return base[id];
+        }
+        protected virtual void Set(string id, IType type)
+        {
+            if (id == null)
+            {
+                throw new ArgumentNullException("id", "cannot be null");
+            }
+            base[id] = type;
+        }
+
+        public Environment() : this(null) { }
+        public Environment(IDictionary<string, IType> outer) : base(outer ?? new Dictionary<string, IType>()) { }
+        public new IType this[string id] { get { return Get(id); } set { Set(id, value); } }
     }
     #endregion
 
     #region Type system
     public interface ITypeSystem
     {
+        IEnvironment NewEnvironment();
+        IEnvironment NewEnvironment(IDictionary<string, IType> outer);
         IType Fresh(IType t, IType[] types);
-        IType @const(IDictionary<string, IType> env, string ctor);
+        IType Const(IEnvironment env, string ctor);
         IType NewGeneric();
-        IType NewType(string id);
-        IType NewType(string id, object meta);
         IType NewType(string id, IType[] args);
         IType NewType(string id, IType[] args, object meta);
         IType NewType(IType constructor, IType[] args);
@@ -209,8 +281,8 @@ namespace System.Language.TypeInference
         IType NewType(IType constructor, string id, IType[] args);
         IType NewType(IType constructor, string id, IType[] args, object meta);
         void Unify(IType t, IType s);
-        IType Infer(IDictionary<string, IType> env, Node node);
-        IType Infer(IDictionary<string, IType> env, Node node, IList<IType> types);
+        IType Infer(IEnvironment env, Node node);
+        IType Infer(IEnvironment env, Node node, IList<IType> types);
     }
 
     public class TypeSystem : ITypeSystem
@@ -218,13 +290,13 @@ namespace System.Language.TypeInference
         internal abstract class Scheme : IType
         {
             protected Scheme(string id) : this(id, null) { }
-            protected Scheme(string id, IType[] args) { if ((this is Type) && string.IsNullOrEmpty(id)) { throw new ArgumentException("cannot be null or empty", "id"); } Id = id; Args = args ?? new IType[0]; }
+            protected Scheme(string id, IType[] args) { if ((this is Type) && (id == null)) { throw new ArgumentNullException("id", "cannot be null"); } Id = id; Args = args ?? new IType[0]; }
             public override string ToString() => Id;
             public IType Constructor { get; protected set; }
             public virtual string Id { get; protected set; }
             public IType[] Args { get; private set; }
             public IType Self { get; internal set; }
-            public object Meta { get; protected set; }
+            public object Metadata { get; protected set; }
             public IType this[int index] => Args[index];
         }
 
@@ -241,8 +313,8 @@ namespace System.Language.TypeInference
 
         internal class Type : Scheme
         {
-            internal Type(IType constructor, string id, IType[] args, object meta) : base(id, args) { Constructor = constructor ?? this; Meta = meta; }
-            public override string ToString() { int colon; string id; id = (colon = (id = Args.Length > 0 ? Id : base.ToString()).IndexOf(':')) > 0 ? id.Substring(0, colon) : id; return (Args.Length > 0 ? string.Format("{0}<{1}>", id, string.Concat(string.Join(", ", Args.Take(Args.Length - 1).Select(arg => arg.ToString())), (Args.Length > 1 ? ", " : string.Empty), Args[Args.Length - 1].ToString())) : id); }
+            internal Type(IType constructor, string id, IType[] args, object meta) : base(id, args) { Constructor = constructor ?? this; Metadata = meta; }
+            public override string ToString() { var id = Args.Length > 0 ? Id : base.ToString(); return (Args.Length > 0 ? string.Format("{0}<{1}>", id, string.Concat(string.Join(", ", Args.Take(Args.Length - 1).Select(arg => arg.ToString())), (Args.Length > 1 ? ", " : string.Empty), Args[Args.Length - 1].ToString())) : id); }
         }
 
         private static IType Create(IType constructor, string id, IType[] args, object meta) => new Type(constructor, id, args, meta);
@@ -280,30 +352,20 @@ namespace System.Language.TypeInference
             }
             else
             {
-                throw new InvalidOperationException(string.Concat("unsupported: ", t.GetType()));
+                throw new InvalidOperationException(string.Format("unsupported {0}", t.GetType()));
             }
         }
         private int id;
         internal int NewId() => ++id;
 
         public static readonly IType Function = Create(null, "Func", null, null);
-        public static readonly ITypeSystem Default = Create();
-        public static ITypeSystem Create() => new TypeSystem();
-        public static ITypeSystem Create<TSystem>() where TSystem : ITypeSystem, new() => new TSystem();
 
         #region ITypeSystem
+        public virtual IEnvironment NewEnvironment() => NewEnvironment(null);
+        public virtual IEnvironment NewEnvironment(IDictionary<string, IType> outer) => new Environment(outer);
         public IType Fresh(IType t, IType[] types) => Fresh(t, types, null);
-        public IType @const(IDictionary<string, IType> env, string ctor)
-        {
-            if (!env.ContainsKey(ctor))
-            {
-                throw new InvalidOperationException(string.Concat("unknown: ", ctor));
-            }
-            return env[ctor];
-        }
+        public IType Const(IEnvironment env, string ctor) => env[ctor];
         public IType NewGeneric() => new Generic(this);
-        public IType NewType(string id) => NewType(id, null);
-        public IType NewType(string id, object meta) => NewType(id, null, meta);
         public IType NewType(string id, IType[] args) => NewType(id, args, null);
         public IType NewType(string id, IType[] args, object meta) => NewType(null, id, args, meta);
         public IType NewType(IType constructor, IType[] args) => NewType(constructor, args, null);
@@ -320,7 +382,7 @@ namespace System.Language.TypeInference
                 {
                     if (OccursIn(t, s))
                     {
-                        throw new InvalidOperationException("recursive unification");
+                        throw new InvalidOperationException(string.Format("recursive unification of {0} in {1}", t, s));
                     }
                     ((Generic)t).Self = s;
                 }
@@ -335,7 +397,7 @@ namespace System.Language.TypeInference
                 var s_type = (Type)s;
                 if ((t_type.Constructor.Id != s_type.Constructor.Id) || (t_type.Args.Length != s_type.Args.Length))
                 {
-                    throw new InvalidOperationException(string.Concat(t_type, " incompatible with ", s_type));
+                    throw new InvalidOperationException(string.Format("{0} incompatible with {1}", t_type, s_type));
                 }
                 for (var i = 0; i < t_type.Args.Length; i++)
                 {
@@ -344,11 +406,11 @@ namespace System.Language.TypeInference
             }
             else
             {
-                throw new InvalidOperationException("undecided unification");
+                throw new InvalidOperationException(string.Format("undecided unification for {0} and {1}", t, s));
             }
         }
-        public IType Infer(IDictionary<string, IType> env, Node node) => Infer(env, node, null);
-        public IType Infer(IDictionary<string, IType> env, Node node, IList<IType> types) => node.Infer(this, env, types ?? new List<IType>());
+        public IType Infer(IEnvironment env, Node node) => Infer(env, node, null);
+        public IType Infer(IEnvironment env, Node node, IList<IType> types) => node.Infer(this, env, types ?? new List<IType>());
         #endregion
     }
     #endregion
