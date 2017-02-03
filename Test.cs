@@ -1,7 +1,7 @@
 /*
 Hindley-Milner type inference over (Lisp-ish) S-expressions (01/2017)
 
-https://repl.it/FTwz/10
+https://repl.it/FTwz/11
 
 Copyright (c) 2017 Cyril Jandia
 
@@ -48,11 +48,22 @@ namespace Test
     {
         public readonly string Cons;
         public readonly int Arity;
-        public CtorInfo(string cons) : this(cons, 0) { }
         public CtorInfo(string cons, int arity) { Cons = cons; Arity = arity; }
-        public IType GetType(IDictionary<string, IType> env) => env.Values.FirstOrDefault(type => (type.Meta != null) && (((CtorInfo)type.Meta).Cons == Cons) && (((CtorInfo)type.Meta).Arity == Arity));
+        public IType GetType(IEnvironment env) =>
+            env.
+            Values.
+            FirstOrDefault
+            (
+                type =>
+                    (type.Metadata != null) &&
+                    (((CtorInfo)type.Metadata).Cons == Cons) &&
+                    (
+                        (((CtorInfo)type.Metadata).Arity == Arity) ||
+                        (((CtorInfo)type.Metadata).Arity < 0)
+                    )
+            );
     }
-
+    
     class Program
     {
         static void Main(string[] args)
@@ -89,14 +100,15 @@ namespace Test
                     Syntax.Lexical("\\=\\=", Syntax.NewSymbol, true)
                 );
 
-            var system = TypeSystem.Default;
-            var env = new Dictionary<string, IType>();
+            var system = new TypeSystem();
+            var env = system.NewEnvironment();
 
             // Classic
-            var @void = system.NewType(typeof(void).FullName);
-            var @bool = system.NewType(typeof(bool).FullName);
-            var @int = system.NewType(typeof(int).FullName);
-            var @string = system.NewType(typeof(string).FullName);
+            var @bool = system.NewType(typeof(bool).FullName, null);
+            var @int = system.NewType(typeof(int).FullName, null);
+            var @string = system.NewType(typeof(string).FullName, null);
+
+            var FuncType = system.NewType(TypeSystem.Function, null, new CtorInfo("->", -1));
 
             // Generic pair type of some `first' and `second' types : Pair<first, second>
             // syntax for pairs:
@@ -113,7 +125,7 @@ namespace Test
             // syntax for tuples:
             // <tuple-sexpr> ::= '(' '|' <sexpr> ... ')' | '(' '|' ')'
             // (thus, "( | )" is the empty tuple)
-            env["Tuple`0"] = system.NewType("Tuple`0", new CtorInfo("|", 0));
+            env["Tuple`0"] = system.NewType("Tuple`0", null, new CtorInfo("|", 0));
             env["Tuple`1"] = system.NewType("Tuple`1", new[] { system.NewGeneric() }, new CtorInfo("|", 1));
             env["Tuple`2"] = system.NewType("Tuple`2", new[] { system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 2));
             env["Tuple`3"] = system.NewType("Tuple`3", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 3));
@@ -123,18 +135,22 @@ namespace Test
             env["Tuple`7"] = system.NewType("Tuple`7", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 7));
             env["Tuple`8"] = system.NewType("Tuple`8", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 8));
             env["Tuple`9"] = system.NewType("Tuple`9", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 9));
+            env["Tuple`10"] = system.NewType("Tuple`10", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 10));
+            env["Tuple`11"] = system.NewType("Tuple`11", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 11));
+            env["Tuple`12"] = system.NewType("Tuple`12", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 12));
+            env["Tuple`13"] = system.NewType("Tuple`13", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 13));
+            env["Tuple`14"] = system.NewType("Tuple`14", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 14));
+            env["Tuple`15"] = system.NewType("Tuple`15", new[] { system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric(), system.NewGeneric() }, new CtorInfo("|", 15));
 
             // Populate the top level typing environment
-            env[@void.Id] = @void;
-            env[@bool.Id] = @bool;
-            env[@int.Id] = @int;
-            env[@string.Id] = @string;
+            env["bool"] = env[@bool.Id] = @bool;
+            env["int"] = env[@int.Id] = @int;
+            env["string"] = env[@string.Id] = @string;
+            env[FuncType.Id] = FuncType;
             env[PairType.Id] = PairType;
             env[ListType.Id] = ListType;
 
-            // Bake some operator function types (to have something to infer about in familiar expression)
-            var unary = system.NewGeneric();
-            var binary0 = system.NewGeneric();
+            // Bake some operator function types (to have something to infer about in familiar expressions)
             var binary1 = system.NewGeneric();
             var binary2 = system.NewGeneric();
             var binary3 = system.NewGeneric();
@@ -154,8 +170,6 @@ namespace Test
             system.Infer(env, Node.Define(Node.Var("||"), Node.Abstract(new[] { Node.Var("left", @bool), Node.Var("right", @bool) }, @bool, Node.Const(@bool))));
 
             // Polymorphic operator types
-            var asType = system.NewGeneric();
-            var formal = system.NewGeneric();
             system.Infer(env, Node.Define(Node.Var("+"), Node.Abstract(new[] { Node.Var("left", binary1), Node.Var("right", binary1) }, binary1, Node.Var("left"))));
             system.Infer(env, Node.Define(Node.Var("-"), Node.Abstract(new[] { Node.Var("left", binary2), Node.Var("right", binary2) }, binary2, Node.Var("left"))));
             system.Infer(env, Node.Define(Node.Var("*"), Node.Abstract(new[] { Node.Var("left", binary3), Node.Var("right", binary3) }, binary3, Node.Var("left"))));
@@ -180,32 +194,32 @@ namespace Test
             system.Infer(env, Node.Define(Node.Var("second"), Node.Abstract(new[] { Node.Var("pair", PairType) }, PairType[1], Node.Const(PairType[1]))));
             system.Infer(env, Node.Define(Node.Var("length"), Node.Abstract(new[] { Node.Var("string", @string) }, @int, Node.Const(@int))));
             system.Infer(env, Node.Define(Node.Var("escape"), Node.Abstract(new[] { Node.Var("string", @string) }, @string, Node.Const(@string))));
-            system.Infer(env, Node.Define(Node.Var("toString"), Node.Abstract(new[] { Node.Var("value", unary) }, @string, Node.Const(@string))));
+            system.Infer(env, Node.Define(Node.Var("toString"), Node.Abstract(new[] { Node.Var("value", system.NewGeneric()) }, @string, Node.Const(@string))));
             system.Infer(env, Node.Define(Node.Var("parseInt"), Node.Abstract(new[] { Node.Var("string", @string) }, @int, Node.Const(@int))));
 
             // DRY helpers
             var isFunction = null as Func<IType, bool>;
-            isFunction = type => type != null ? (type.Constructor != null ? type.Constructor.Id == TypeSystem.Function.Id : isFunction(type.Self)) : false;
+            isFunction = type => type != null ? (type.Constructor != null ? type.Constructor == TypeSystem.Function : isFunction(type.Self)) : false;
             Func<string, int, IType> typeOf = (id, arity) => id != null ? new CtorInfo(id, arity).GetType(env) : null;
             Func<string, int, bool> isCtor = (id, arity) => typeOf(id, arity) != null;
             Func<object, bool> isArray = value => value is object[];
             Func<object, object[]> array = value => (object[])value;
             Func<object, bool> isNil = value => isArray(value) && (array(value).Length == 0);
-            Func<object[], bool> isSingleton = value => (value.Length == 3) && isNil(value[2]);
-            var NIL = new object[0];
 
             // A sort of poor man's visitor (over the S-expr) : just a bunch of lambdas
-            Func<object, Node> visitSExpr = null;
+            Func<string, Node> visitError = message => { throw new InvalidOperationException(message); };
+            Func<object, bool, Node> visitSExpr = null;
             Func<object, Let> visitLet = null;
-            Func<object, Define> visitDefine = null;
-            Func<object, Apply> visitApply = null;
-            Func<object, int, Apply> visitCtor = null;
+            Func<object, int, bool, Define> visitDefine = null;
+            Func<object, bool, Apply> visitApply = null;
+            Func<object, int, bool, Apply> visitCtor = null;
             Func<object, Abstract> visitAbstract = null;
             Func<object, Var> visitVar = null;
             Func<object, Const> visitConst = null;
+            Func<object, Node> visit;
 
             visitSExpr =
-                sexpr =>
+                (sexpr, scheme) =>
                 {
                     var arity = (isArray(sexpr) ? array(sexpr).Length : 0) - 1;
                     var node =
@@ -224,22 +238,22 @@ namespace Test
                                         (
                                             !isCtor(Syntax.Identifier(array(sexpr)[1]), arity) ?
                                             // ( sexpr ... )
-                                            visitApply(sexpr)
+                                            visitApply(sexpr, scheme)
                                             :
                                             // ( sexpr <ctor> ... )
-                                            visitCtor(sexpr, 1)
+                                            visitCtor(sexpr, 1, scheme)
                                         )
                                         :
                                         // ( <ctor> ... )
-                                        visitCtor(sexpr, 0)
+                                        visitCtor(sexpr, 0, scheme)
                                     )
                                     :
                                     // ( ... => ... )
-                                    (Node)visitAbstract(sexpr)
+                                    !scheme ? visitAbstract(sexpr) : visitError("'=>' not allowed in type annotations")
                                 )
                                 :
                                 // ( let ... )
-                                visitLet(sexpr)
+                                !scheme ? visitLet(sexpr) : visitError("'let' not allowed in type annotations")
                             )
                             :
                             (
@@ -248,10 +262,10 @@ namespace Test
                                 (
                                     !isCtor(Syntax.Identifier(array(sexpr)[0]), 0) ?
                                     // ( sexpr )
-                                    visitApply(sexpr)
+                                    (Node)visitApply(sexpr, scheme)
                                     :
                                     // ( <ctor> )
-                                    (Node)visitCtor(sexpr, 0)
+                                    visitCtor(sexpr, 0, scheme)
                                 )
                                 :
                                 // ( )
@@ -263,20 +277,25 @@ namespace Test
                         Syntax.Identifier(sexpr) != null ? (Node)visitVar(sexpr) : visitConst(sexpr);
                     return node;
                 };
+
             visitLet =
                 sexpr =>
                 {
-                    var let = Node.Let(array(array(sexpr)[1]).Select(item => visitDefine(item)).ToArray(), visitSExpr(array(sexpr)[2]));
+                    var let = Node.Let(array(array(sexpr)[1]).Select(item => visitDefine(item, 0, false)).ToArray(), visitSExpr(array(sexpr)[2], false));
                     return let;
                 };
+
             visitDefine =
-                sexpr =>
+                (sexpr, at, scheme) =>
                 {
-                    var define = Node.Define(visitVar(array(sexpr)[0]), visitSExpr(array(sexpr)[1]));
+                    var definition = visitSExpr(array(sexpr)[1 - at], scheme);
+                    var identifier = visitVar(array(sexpr)[at]);
+                    var define = Node.Define(identifier, definition);
                     return define;
                 };
+
             visitApply =
-                sexpr =>
+                (sexpr, scheme) =>
                 {
                     Func<IType[], IType> newFunction = signature => system.NewType(TypeSystem.Function, signature);
                     Apply apply;
@@ -284,50 +303,76 @@ namespace Test
                     if (((id = Syntax.Identifier(array(sexpr)[0])) != null) && (!env.ContainsKey(id) || isFunction(env[id])))
                     {
                         var fn = Node.Var(id, !env.ContainsKey(id) ? env[id] = newFunction(array(sexpr).Skip(1).Select(arg => system.NewGeneric()).Concat(new[] { system.NewGeneric() }).ToArray()) : env[id]);
-                        apply = Node.Apply(fn, array(sexpr).Skip(1).Select(arg => visitSExpr(arg)).ToArray());
+                        apply = Node.Apply(fn, array(sexpr).Skip(1).Select(arg => visitSExpr(arg, false)).ToArray());
                     }
                     else
                     {
                         apply =
                             Node.Apply
                             (
-                                visitSExpr(array(sexpr)[0]),
-                                array(sexpr).Skip(1).Select(arg => visitSExpr(arg)).ToArray(),
-                                id != null ? env[id] : null
+                                visitSExpr(array(sexpr)[0], scheme),
+                                array(sexpr).Skip(1).Select(arg => visitSExpr(arg, scheme)).ToArray(),
+                                id != null ? env[id] : null,
+                                scheme
                             );
                     }
                     return apply;
                 };
+
             visitCtor =
-                (sexpr, at) =>
+                (sexpr, at, scheme) =>
                 {
                     var arity = array(sexpr).Length - 1;
                     var type = typeOf(Syntax.Identifier(array(sexpr)[at]), arity);
-                    var ctor = Node.Apply(Node.Var(type.Id), new[] { array(sexpr)[1 - at] }.Concat(array(sexpr).Skip(2).Take(type.Args.Length - 1)).Select(arg => visitSExpr(arg)).ToArray(), type);
+                    Node[] argv;
+                    if (isFunction(type))
+                    {
+                        type = TypeSystem.Function;
+                        argv =
+                            at > 0 ?
+                            array(sexpr).Where((arg, i) => (i % 2) == 0).Select(arg => visitSExpr(arg, scheme)).ToArray()
+                            :
+                            array(sexpr).Skip(1).Select(arg => visitSExpr(arg, scheme)).ToArray();
+                    }
+                    else
+                    {
+                        argv = new[] { array(sexpr)[1 - at] }.Concat(array(sexpr).Skip(2).Take(type.Args.Length - 1)).Select(arg => visitSExpr(arg, scheme)).ToArray();
+                    }
+                    var ctor = Node.Apply(Node.Var(type.Id), argv, type, scheme);
                     return ctor;
                 };
+
             visitAbstract =
                 sexpr =>
                 {
                     var lambda =
                         Node.Abstract
                         (
-                            array(array(sexpr)[0]).Select(arg => visitVar(arg)).ToArray(),
-                            visitSExpr(array(sexpr)[2])
+                            array(array(sexpr)[0]).Select(arg => isArray(arg) ? (Node)visitDefine(arg, 1, true) : visitVar(arg)).ToArray(),
+                            visitSExpr(array(sexpr)[2], false)
                         );
                     return lambda;
                 };
+
             visitVar =
                 sexpr =>
                 {
                     var var = Node.Var(Syntax.Identifier(sexpr));
                     return var;
                 };
+
             visitConst =
                 sexpr =>
                 {
                     var @const = Node.Const(sexpr);
                     return @const;
+                };
+
+            visit =
+                sexpr =>
+                {
+                    var root = visitSExpr(sexpr, false);
+                    return root;
                 };
 
             Action<Node> analyze =
@@ -342,7 +387,7 @@ namespace Test
                             }
                             catch (Exception ex)
                             {
-                                return system.NewType(string.Format("Type error: {0}", ex.Message));
+                                return system.NewType(string.Format("Type error: {0}", ex.Message), null);
                             }
                         };
                     var sw = new System.Diagnostics.Stopwatch();
@@ -358,7 +403,7 @@ namespace Test
                     }
                     sw.Stop();
                     Console.WriteLine();
-                    Console.WriteLine(string.Format("{0}:\r\n\t{1}", root.Body, tryInfer(root)));
+                    Console.WriteLine(string.Format("{0}:\r\n\t{1}", root.Body, tryInfer(root.Body)));
                     Console.WriteLine();
                     Console.WriteLine("... Done (in {0} ms)", sw.ElapsedMilliseconds);
                 };
@@ -372,11 +417,14 @@ namespace Test
                     ( let
                         (
                             ( id ( ( x ) => x ) )
+
                             ( factorial ( ( n ) => ( if ( > n 0 ) ( * n ( factorial ( - n 1 ) ) ) 1 ) ) )
+
                             ( f_o_g ( ( f g ) => ( ( x ) => ( f ( g x ) ) ) ) )
 
                             // See http://lambda-the-ultimate.org/node/5408
-                            ( f ( ( x ) => ( ( g true ) , x ) ) )              // ML-ish: f x = (g True, x)
+                            ( f ( ( x ) => ( ( g true ) , x ) ) )                 // ML-ish: f x = (g True, x)
+
                             ( g ( ( b ) =>
                                 ( if b
                                     0                                             // ML-ish: g True = 0
@@ -386,6 +434,7 @@ namespace Test
 
                             // See (page 3)
                             // [Fritz Henglein] http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.388.430&rep=rep1&type=pdf
+
                             ( fmap (
                                 ( f l ) =>
                                 ( if ( ! ( empty l ) )
@@ -424,19 +473,48 @@ namespace Test
                                     ( head ( ( comp createList removeList ) v2 ) )
                                 )
                             ) )
-                            ( listOfTriples (
+
+                            ( threeValuesToAListOfTriples (
                                 ( a b c ) => ( ( | a b c ) : ( ) )
                             ) )
-                            ( pairOfLists (
+                            ( twoValuesToAPairOfLists (
                                 ( a b ) => ( ( a : ( ) ) , ( b : ( ) ) )
                             ) )
-                            ( testValue1 ( listOfTriples 1 ""a"" true ) )
-                            ( testValue2 ( pairOfLists 1 ""a"" ) )
+
+                            // advanced / more interesting:
+                            // demonstrates generic type annotations
+                            // mixed with constructor syntax ...
+                            ( moreInteresting (
+                                (
+                                    ( ( a -> ( ( a , b ) p ) ) f )
+                                    l
+                                ) =>
+                                // `l' will be inferred to inhabit `( List a )' ...
+                                // ... and as for the result of moreInteresting,
+                                // to inhabit `( List b )'
+                                ( ( second ( f ( head l ) ) ) : ( ) )
+                            ) )
+
+                            ( testOutput1 ( threeValuesToAListOfTriples 1 ""a"" true ) )
+                            ( testOutput2 ( twoValuesToAPairOfLists 1 ""a"" ) )                            
+
+                            // moreInteresting which will typecheck
+                            ( testOutput3 (
+                                moreInteresting
+                                ( ( s ) => ( s , ( parseInt s ) ) ) // ... that's for the formal `f'
+                                ( ""1"" : ( ""2"" : ( ) ) ) // ... that's for the formal `l'
+                            ) )
+                            // moreInteresting which cannot typecheck
+                            ( testOutput3cannotTypecheck (
+                                moreInteresting
+                                ( ( s ) => ( s , ( parseInt s ) ) )
+                                ( 1 : ( 2 : ( ) ) )
+                            ) )
                         )
 
-                        // report type inference results thru a fat tuple in the let's body
+                        // report type inference results thru a fat tuple in let's body
                         ( |
-                            // (uncomment whatever you're interested in)
+                            //( uncomment whatever you're interested in )
                             //( fmap ( f_o_g factorial parseInt ) ( ""0"" : ( ""1"" : ( ""2"" : ( ""3"" : ( ) ) ) ) ) )
                             //( first ( f true ) )
                             //( foo 123 )
@@ -445,13 +523,15 @@ namespace Test
                             //( compList ( true : ( false : ( ) ) ) )
                             //( sumList ( 1 : ( 2 : ( 3 : ( ) ) ) ) )
                             //( appComp 5 ( 5 : ( ) ) )
-                            testValue1
-                            testValue2
+                            testOutput1
+                            testOutput2
+                            testOutput3
+                            testOutput3cannotTypecheck
                         )
                     )
                 ");
 
-            var ast = visitSExpr(parsed);
+            var ast = visit(parsed);
 
             Console.WriteLine();
             Console.WriteLine("Abstract syntax:");
