@@ -53,10 +53,10 @@ namespace System.Language.TypeInference
         public static Define Define(Var var, Node body) => new Define { Spec = var, Body = (body as Node) ?? Const(body) };
         public static Let Let(Define[] defs, Node body) => new Let { Args = defs, Body = body };
         public abstract IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types);
-        public object Spec { get; set; }
-        public Node[] Args { get; set; }
-        public Node Body { get; set; }
-        public object Type { get; set; }
+        public object Spec { get; private set; }
+        public Node[] Args { get; private set; }
+        public Node Body { get; private set; }
+        public object Type { get; private set; }
         public bool IsAnnotation { get; private set; }
     }
 
@@ -71,6 +71,7 @@ namespace System.Language.TypeInference
         public override string ToString() => Id;
         public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types) => system.Fresh(env[Id], types.ToArray());
         public string Id => (string)Spec;
+        public bool IsConstructor => (Type is IType) && ((IType)Type).IsConstructor;
     }
 
     public class Abstract : Node
@@ -78,7 +79,7 @@ namespace System.Language.TypeInference
         public override string ToString() => string.Format("( {0}){2} => {1}", Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty, Body, Type != null ? string.Concat(" : ", Type) : string.Empty);
         public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
         {
-            var scope = system.NewEnvironment(env);
+            var scope = env.Local(system);
             var known = new List<IType>(types);
             var args = new List<IType>();
             foreach (var arg in Args)
@@ -109,6 +110,10 @@ namespace System.Language.TypeInference
                     known.Add(type);
                 }
                 args.Add(type);
+                if (!type.Value.IsConstructor)
+                {
+                    type.Value.Bind(var.Id);
+                }
             }
             args.Add(system.Infer(scope, Body is Let ? Body.Args[Body.Args.Length - 1] : Body, known));
             if (Type != null)
@@ -158,7 +163,8 @@ namespace System.Language.TypeInference
                             null
                     ).
                     ToArray();
-                return system.NewType(ctor, Args.Select(arg => system.Infer(env, ToFormal(system, env, types, arg), types)).ToArray());
+                var type = system.NewType(ctor, Args.Select(arg => system.Infer(env, ToFormal(system, env, types, arg), types)).ToArray());
+                return type;
             }
             else
             {
@@ -179,7 +185,7 @@ namespace System.Language.TypeInference
             var args = Args.Select(arg => system.Infer(env, ToFormal(system, env, types, arg), types)).ToList();
             var expr = (Node)Spec;
             var self = system.Infer(env, expr, types);
-            var @out = system.NewGeneric();
+            IType @out;
             if (Type != null)
             {
                 var ctor = !(Type is IType) ? system.Const(env, (string)Type) : (IType)Type;
@@ -187,6 +193,7 @@ namespace System.Language.TypeInference
             }
             else
             {
+                @out = system.NewGeneric();
                 args.Add(@out);
                 system.Unify(system.NewType(TypeSystem.Function, args.ToArray()), self);
             }
@@ -202,10 +209,11 @@ namespace System.Language.TypeInference
             var known = new List<IType>(types);
             var type = system.NewGeneric();
             var var = (Var)Spec;
+            var scope = Body.IsAnnotation ? env.Local(system) : env;
             env[var.Id] = type;
             known.Add(type);
-            system.Unify(type, system.Infer(env, Body, known));
-            return type;
+            system.Unify(type, system.Infer(scope, Body, known));
+            return env[var.Id] = !type.Value.IsConstructor ? type.Value.Bind(var.Id) : type.Value;
         }
     }
 
@@ -214,8 +222,8 @@ namespace System.Language.TypeInference
         public override string ToString() => string.Format("( ( {0}) {1} )", Args.Length > 0 ? string.Concat(string.Join(" ", Args.Select(arg => arg.ToString()).ToArray()), " ") : string.Empty, Body);
         public override IType Infer(ITypeSystem system, IEnvironment env, IList<IType> types)
         {
-            env = system.NewEnvironment(env);
-            return Args.Select(let => let.Infer(system, env, types)).Concat(new[] { Body.Infer(system, env, types) }).Last();
+            env = env.Local(system);
+            return Args.Select(define => system.Infer(env, define, types)).Concat(new[] { system.Infer(env, Body, types) }).Last();
         }
     }
     #endregion
@@ -223,18 +231,23 @@ namespace System.Language.TypeInference
     #region Type schemes
     public interface IType
     {
+        IType Bind(string name);
         IType Constructor { get; }
         string Id { get; }
         IType[] Args { get; }
         IType Self { get; }
-        IType this[int index] { get; }
+        Var Name { get; }
+        IType Value { get; }
+        bool IsConstructor { get; }
         object Metadata { get; }
+        IType this[int index] { get; }
     }
     #endregion
 
     #region Environment
     public interface IEnvironment : IDictionary<string, IType>
     {
+        IEnvironment Local(ITypeSystem system);
     }
 
     public class Environment : Dictionary<string, IType>, IEnvironment
@@ -262,6 +275,7 @@ namespace System.Language.TypeInference
 
         public Environment() : this(null) { }
         public Environment(IDictionary<string, IType> outer) : base(outer ?? new Dictionary<string, IType>()) { }
+        public IEnvironment Local(ITypeSystem system) => system.NewEnvironment(this);
         public new IType this[string id] { get { return Get(id); } set { Set(id, value); } }
     }
     #endregion
@@ -289,13 +303,17 @@ namespace System.Language.TypeInference
     {
         internal abstract class Scheme : IType
         {
-            protected Scheme(string id) : this(id, null) { }
-            protected Scheme(string id, IType[] args) { if ((this is Type) && (id == null)) { throw new ArgumentNullException("id", "cannot be null"); } Id = id; Args = args ?? new IType[0]; }
+            protected Scheme(string id) { if ((this is Type) && (id == null)) { throw new ArgumentNullException("id", "cannot be null"); } Bind(Id = id); }
+            protected Scheme(string id, IType[] args) : this(id) { Args = args ?? new IType[0]; }
             public override string ToString() => Id;
+            public IType Bind(string name) { Name = Node.Var(name, this); return this; }
             public IType Constructor { get; protected set; }
             public virtual string Id { get; protected set; }
             public IType[] Args { get; private set; }
             public IType Self { get; internal set; }
+            public Var Name { get; private set; }
+            public IType Value => Self != null ? Self.Value : this;
+            public bool IsConstructor => Constructor == this;
             public object Metadata { get; protected set; }
             public IType this[int index] => Args[index];
         }
