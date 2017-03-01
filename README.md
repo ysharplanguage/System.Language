@@ -10,4 +10,4 @@
 
 ![Hindley-Milner type inference over (Lisp-ish) S-expressions](tiri.jpg)
 
-CJ
+CJJ
