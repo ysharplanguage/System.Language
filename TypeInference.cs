@@ -3,7 +3,7 @@ System.Language.TypeInference ( https://en.wikipedia.org/wiki/Hindley%E2%80%93Mi
 
 Copyright (c) 2017 Cyril Jandia
 
-http://www.cjandia.com/
+https://ysharp.io/
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the
